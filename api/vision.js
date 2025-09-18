@@ -34,8 +34,12 @@ export default async function handler(req, res) {
     // 从环境变量获取API密钥
     const API_KEY = process.env.GOOGLE_API_KEY;
     
+    console.log('🔍 Environment check - API_KEY exists:', !!API_KEY);
+    console.log('🔍 API_KEY length:', API_KEY ? API_KEY.length : 0);
+    
     if (!API_KEY) {
       console.error('❌ GOOGLE_API_KEY not configured in environment variables');
+      console.error('❌ Available env vars:', Object.keys(process.env).filter(key => key.includes('GOOGLE')));
       return res.status(500).json({ 
         success: false, 
         error: 'API key not configured' 
@@ -60,9 +64,12 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('❌ Vision API Error:', error);
+    console.error('❌ Error details:', error.message);
+    console.error('❌ Error stack:', error.stack);
     return res.status(500).json({ 
       success: false, 
-      error: 'Internal server error' 
+      error: 'Internal server error',
+      details: error.message // 临时添加错误详情用于调试
     });
   }
 }
