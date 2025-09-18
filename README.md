@@ -17,3 +17,4 @@
 ## 环境变量
 
 - `GOOGLE_API_KEY` - Google Gemini API密钥
+# Force deployment trigger
