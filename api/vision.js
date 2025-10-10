@@ -1,5 +1,11 @@
-// Vercel Serverless Function: AI视觉识别代理
+// Vercel Serverless Function: AI视觉识别代理 (Vertex AI)
 // 路径: /api/vision
+
+import { GoogleAuth } from 'google-auth-library';
+
+// 全局令牌缓存（Vercel Serverless 每个实例会保留）
+let cachedToken = null;
+let tokenExpiry = null;
 
 export default async function handler(req, res) {
   // 启用 CORS
@@ -31,35 +37,38 @@ export default async function handler(req, res) {
       });
     }
 
-    // 从环境变量获取API密钥
-    const API_KEY = process.env.GOOGLE_API_KEY;
+    // 从环境变量获取配置
+    const PROJECT_ID = process.env.GCLOUD_PROJECT_ID;
+    const LOCATION = process.env.GCLOUD_LOCATION || 'us-central1';
+    const MODEL = process.env.GEMINI_MODEL || model || 'gemini-2.5-flash';
+    const CREDENTIALS_JSON = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
     
-    console.log('🔍 Environment check - API_KEY exists:', !!API_KEY);
-    console.log('🔍 API_KEY length:', API_KEY ? API_KEY.length : 0);
+    console.log('🔍 Environment check:');
+    console.log('  - PROJECT_ID:', PROJECT_ID);
+    console.log('  - LOCATION:', LOCATION);
+    console.log('  - MODEL:', MODEL);
+    console.log('  - Has credentials:', !!CREDENTIALS_JSON);
     
-    if (!API_KEY) {
-      console.error('❌ GOOGLE_API_KEY not configured in environment variables');
-      console.error('❌ Available env vars:', Object.keys(process.env).filter(key => key.includes('GOOGLE')));
+    if (!PROJECT_ID || !CREDENTIALS_JSON) {
+      console.error('❌ Missing required environment variables');
       return res.status(500).json({ 
         success: false, 
-        error: 'API key not configured' 
+        error: 'Server configuration error: Missing PROJECT_ID or credentials' 
       });
     }
 
-    console.log('🚀 Processing AI request...');
+    console.log('🚀 Processing AI request via Vertex AI...');
     console.log('📱 Device ID:', deviceID);
-    console.log('🤖 Model:', model);
+    console.log('🤖 Model:', MODEL);
 
-    // 调用Google Gemini API
-    const result = await callGeminiAPI(imageData, prompt, API_KEY);
+    // 调用 Vertex AI
+    const result = await callVertexAI(imageData, prompt, PROJECT_ID, LOCATION, MODEL, CREDENTIALS_JSON);
     
-    console.log('✅ AI request successful');
+    console.log('✅ Vertex AI request successful');
     return res.status(200).json({
       success: true,
-      result: result,
-      usage: {
-        tokensUsed: 1000 // 模拟token使用量
-      }
+      result: result.text,
+      usage: result.usage
     });
 
   } catch (error) {
@@ -69,60 +78,129 @@ export default async function handler(req, res) {
     return res.status(500).json({ 
       success: false, 
       error: 'Internal server error',
-      details: error.message // 临时添加错误详情用于调试
+      details: error.message
     });
   }
 }
 
-// 调用Google Gemini API
-async function callGeminiAPI(imageData, prompt, API_KEY) {
-    const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: prompt },
-            {
-              inlineData: {
-                mimeType: "image/jpeg",
-                data: imageData
-              }
-            }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.0,
-          maxOutputTokens: 500,
-          candidateCount: 1
-        },
-        safetySettings: [
-          {
-            category: "HARM_CATEGORY_HARASSMENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          },
-          {
-            category: "HARM_CATEGORY_HATE_SPEECH", 
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          },
-          {
-            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          },
-          {
-            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold: "BLOCK_MEDIUM_AND_ABOVE"
-          }
-        ]
-      })
+// 获取 Vertex AI 访问令牌
+async function getVertexAIAccessToken(credentialsJSON) {
+  // 检查缓存的令牌是否仍然有效（提前5分钟过期）
+  if (cachedToken && tokenExpiry && Date.now() < tokenExpiry - 5 * 60 * 1000) {
+    console.log('🔄 Using cached access token');
+    return cachedToken;
+  }
+
+  console.log('🔑 Fetching new access token...');
+  
+  try {
+    // 解析服务账号凭证
+    const credentials = JSON.parse(credentialsJSON);
+    
+    // 使用 google-auth-library 获取令牌
+    const auth = new GoogleAuth({
+      credentials: credentials,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform']
     });
-
-    if (!response.ok) {
-      throw new Error(`Gemini API error: ${response.status}`);
+    
+    const client = await auth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    
+    if (!tokenResponse.token) {
+      throw new Error('Failed to obtain access token');
     }
+    
+    // 缓存令牌（默认1小时有效期）
+    cachedToken = tokenResponse.token;
+    tokenExpiry = Date.now() + 60 * 60 * 1000; // 1小时后过期
+    
+    console.log('✅ Access token obtained successfully');
+    return cachedToken;
+    
+  } catch (error) {
+    console.error('❌ Failed to get access token:', error);
+    throw new Error(`Authentication failed: ${error.message}`);
+  }
+}
 
-    const data = await response.json();
-    return data.candidates[0]?.content?.parts[0]?.text || '';
+// 调用 Vertex AI Gemini API
+async function callVertexAI(imageData, prompt, projectId, location, model, credentialsJSON) {
+  // 获取访问令牌
+  const accessToken = await getVertexAIAccessToken(credentialsJSON);
+  
+  // 构建 Vertex AI 端点
+  const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
+  
+  console.log('🌐 Vertex AI endpoint:', endpoint);
+  
+  // 构建请求体（与 AI Studio 格式相同）
+  const requestBody = {
+    contents: [{
+      parts: [
+        { text: prompt },
+        {
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: imageData
+          }
+        }
+      ]
+    }],
+    generationConfig: {
+      temperature: 0.0,
+      maxOutputTokens: 500,
+      candidateCount: 1
+    },
+    safetySettings: [
+      {
+        category: "HARM_CATEGORY_HARASSMENT",
+        threshold: "BLOCK_MEDIUM_AND_ABOVE"
+      },
+      {
+        category: "HARM_CATEGORY_HATE_SPEECH", 
+        threshold: "BLOCK_MEDIUM_AND_ABOVE"
+      },
+      {
+        category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        threshold: "BLOCK_MEDIUM_AND_ABOVE"
+      },
+      {
+        category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+        threshold: "BLOCK_MEDIUM_AND_ABOVE"
+      }
+    ]
+  };
+  
+  // 发送请求到 Vertex AI
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('❌ Vertex AI error response:', errorText);
+    throw new Error(`Vertex AI API error: ${response.status} - ${errorText}`);
+  }
+
+  const data = await response.json();
+  
+  // 解析响应
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const usageMetadata = data.usageMetadata || {};
+  
+  console.log('📊 Usage metadata:', usageMetadata);
+  
+  return {
+    text: text,
+    usage: {
+      tokensUsed: usageMetadata.totalTokenCount || 0,
+      promptTokens: usageMetadata.promptTokenCount || 0,
+      candidatesTokens: usageMetadata.candidatesTokenCount || 0
+    }
+  };
 }

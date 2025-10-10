@@ -1,13 +1,15 @@
 {
   "name": "usefirst-ai-proxy",
-  "version": "1.0.0",
-  "description": "AI API Proxy for UseFirst App",
+  "version": "2.0.0",
+  "description": "AI API Proxy for UseFirst App (Vertex AI)",
   "main": "index.js",
   "scripts": {
     "dev": "vercel dev",
     "deploy": "vercel --prod"
   },
-  "dependencies": {},
+  "dependencies": {
+    "google-auth-library": "^9.0.0"
+  },
   "engines": {
     "node": "22.x"
   }
