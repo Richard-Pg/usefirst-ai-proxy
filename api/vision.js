@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     // 从环境变量获取配置
     const PROJECT_ID = process.env.GCLOUD_PROJECT_ID;
     const LOCATION = process.env.GCLOUD_LOCATION || 'us-central1';
-    const MODEL = process.env.GEMINI_MODEL || model || 'gemini-1.5-flash-001';
+    const MODEL = process.env.GEMINI_MODEL || model || 'gemini-2.5-flash';
     const CREDENTIALS_JSON = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
     
     console.log('🔍 Environment check:');
