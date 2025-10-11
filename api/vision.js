@@ -29,11 +29,11 @@ export default async function handler(req, res) {
   try {
     const { imageData, prompt, model, deviceID } = req.body;
 
-    // 验证请求数据
-    if (!imageData || !prompt) {
+    // 验证请求数据（允许纯文本测试，imageData 可以为空）
+    if (!prompt) {
       return res.status(400).json({ 
         success: false, 
-        error: 'Missing required fields: imageData, prompt' 
+        error: 'Missing required field: prompt' 
       });
     }
 
@@ -137,7 +137,7 @@ async function callVertexAI(imageData, prompt, projectId, location, model, crede
   const requestBody = {
     contents: [{
       role: "user",
-      parts: imageData ? [
+      parts: (imageData && imageData.length > 10) ? [
         { text: prompt },
         {
           inline_data: {
