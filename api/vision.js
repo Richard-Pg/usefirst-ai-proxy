@@ -133,9 +133,10 @@ async function callVertexAI(imageData, prompt, projectId, location, model, crede
   
   console.log('🌐 Vertex AI endpoint:', endpoint);
   
-  // 构建请求体（与 AI Studio 格式相同）
+  // 构建请求体（Vertex AI 格式）
   const requestBody = {
     contents: [{
+      role: "user", // Vertex AI 要求必须指定 role
       parts: [
         { text: prompt },
         {
