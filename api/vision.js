@@ -153,6 +153,9 @@ async function callVertexAI(imageData, prompt, projectId, location, model, crede
     }
   };
   
+  // 打印请求详情（调试）
+  console.log('📤 Request body:', JSON.stringify(requestBody, null, 2));
+  
   // 发送请求到 Vertex AI
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -163,9 +166,12 @@ async function callVertexAI(imageData, prompt, projectId, location, model, crede
     body: JSON.stringify(requestBody)
   });
 
+  console.log('📥 Response status:', response.status);
+  
   if (!response.ok) {
     const errorText = await response.text();
     console.error('❌ Vertex AI error response:', errorText);
+    console.error('❌ Request was:', JSON.stringify(requestBody, null, 2));
     throw new Error(`Vertex AI API error: ${response.status} - ${errorText}`);
   }
 
