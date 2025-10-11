@@ -40,7 +40,7 @@ export default async function handler(req, res) {
     // 从环境变量获取配置
     const PROJECT_ID = process.env.GCLOUD_PROJECT_ID;
     const LOCATION = process.env.GCLOUD_LOCATION || 'us-central1';
-    const MODEL = process.env.GEMINI_MODEL || model || 'gemini-2.5-flash';
+    const MODEL = process.env.GEMINI_MODEL || model || 'gemini-1.5-flash-001';
     const CREDENTIALS_JSON = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
     
     console.log('🔍 Environment check:');
@@ -128,8 +128,8 @@ async function callVertexAI(imageData, prompt, projectId, location, model, crede
   // 获取访问令牌
   const accessToken = await getVertexAIAccessToken(credentialsJSON);
   
-  // 构建 Vertex AI 端点
-  const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
+  // 构建 Vertex AI 端点（使用 v1beta1 以支持更多模型）
+  const endpoint = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
   
   console.log('🌐 Vertex AI endpoint:', endpoint);
   
