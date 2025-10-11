@@ -133,24 +133,14 @@ async function callVertexAI(imageData, prompt, projectId, location, model, crede
   
   console.log('🌐 Vertex AI endpoint:', endpoint);
   
-  // 构建请求体（Vertex AI 格式 - 使用 snake_case）
+  // 构建请求体（Vertex AI 格式 - 最简化测试）
   const requestBody = {
     contents: [{
       role: "user",
       parts: [
-        { text: prompt },
-        {
-          inline_data: {  // Vertex AI 使用 snake_case
-            mime_type: "image/jpeg",
-            data: imageData
-          }
-        }
+        { text: prompt }
       ]
-    }],
-    generation_config: {  // Vertex AI 使用 snake_case
-      temperature: 0.1,  // 改为非零值
-      max_output_tokens: 2048  // 使用更大的值
-    }
+    }]
   };
   
   // 打印请求详情（调试）
