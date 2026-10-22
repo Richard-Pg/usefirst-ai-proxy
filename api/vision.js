@@ -27,7 +27,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { imageData, prompt, model, deviceID } = req.body;
+    const { imageData, prompt, deviceID, maxOutputTokens = 4096 } = req.body;
 
     // 验证请求数据（允许纯文本测试，imageData 可以为空）
     if (!prompt) {
@@ -39,8 +39,9 @@ export default async function handler(req, res) {
 
     // 从环境变量获取配置
     const PROJECT_ID = process.env.GCLOUD_PROJECT_ID;
-    const LOCATION = process.env.GCLOUD_LOCATION || 'us-central1';
-    const MODEL = process.env.GEMINI_MODEL || model || 'gemini-2.5-flash';
+    const LOCATION = process.env.GCLOUD_LOCATION || 'global';
+    // Keep model selection on the server so installed clients upgrade together.
+    const MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
     const CREDENTIALS_JSON = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
     
     console.log('🔍 Environment check:');
@@ -62,12 +63,15 @@ export default async function handler(req, res) {
     console.log('🤖 Model:', MODEL);
 
     // 调用 Vertex AI
-    const result = await callVertexAI(imageData, prompt, PROJECT_ID, LOCATION, MODEL, CREDENTIALS_JSON);
+    const outputLimit = Math.min(16384, Math.max(256, Math.trunc(Number(maxOutputTokens) || 4096)));
+    const result = await callVertexAI(imageData, prompt, PROJECT_ID, LOCATION, MODEL, CREDENTIALS_JSON, outputLimit);
     
     console.log('✅ Vertex AI request successful');
     return res.status(200).json({
       success: true,
       result: result.text,
+      model: MODEL,
+      modelVersion: result.modelVersion,
       usage: result.usage
     });
 
@@ -124,12 +128,13 @@ async function getVertexAIAccessToken(credentialsJSON) {
 }
 
 // 调用 Vertex AI Gemini API
-async function callVertexAI(imageData, prompt, projectId, location, model, credentialsJSON) {
+async function callVertexAI(imageData, prompt, projectId, location, model, credentialsJSON, maxOutputTokens) {
   // 获取访问令牌
   const accessToken = await getVertexAIAccessToken(credentialsJSON);
   
   // 构建 Vertex AI 端点（使用 v1beta1 以支持更多模型）
-  const endpoint = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
+  const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+  const endpoint = `https://${host}/v1beta1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
   
   console.log('🌐 Vertex AI endpoint:', endpoint);
   
@@ -150,13 +155,14 @@ async function callVertexAI(imageData, prompt, projectId, location, model, crede
       ]
     }],
     generation_config: {
-      temperature: 0.1,
-      max_output_tokens: 2048
+      temperature: model === 'gemini-3.8-flash' ? 1.0 : 0.1,
+      max_output_tokens: maxOutputTokens,
+      ...(model === 'gemini-3.8-flash' ? { thinking_config: { thinking_level: 'LOW' } } : {})
     }
   };
   
   // 打印请求详情（调试）
-  console.log('📤 Request body:', JSON.stringify(requestBody, null, 2));
+  console.log('📤 Output token limit:', maxOutputTokens);
   
   // 发送请求到 Vertex AI
   const response = await fetch(endpoint, {
@@ -165,6 +171,7 @@ async function callVertexAI(imageData, prompt, projectId, location, model, crede
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${accessToken}`
     },
+    signal: AbortSignal.timeout(50000),
     body: JSON.stringify(requestBody)
   });
 
@@ -173,20 +180,27 @@ async function callVertexAI(imageData, prompt, projectId, location, model, crede
   if (!response.ok) {
     const errorText = await response.text();
     console.error('❌ Vertex AI error response:', errorText);
-    console.error('❌ Request was:', JSON.stringify(requestBody, null, 2));
     throw new Error(`Vertex AI API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
   
   // 解析响应
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const candidate = data.candidates?.[0];
+  const text = (candidate?.content?.parts || [])
+    .filter(part => !part.thought && typeof part.text === 'string')
+    .map(part => part.text)
+    .join('');
+  if (!text || candidate.finishReason === 'MAX_TOKENS') {
+    throw new Error(`Incomplete model response (${candidate?.finishReason || 'no text'})`);
+  }
   const usageMetadata = data.usageMetadata || {};
   
   console.log('📊 Usage metadata:', usageMetadata);
   
   return {
     text: text,
+    modelVersion: data.modelVersion,
     usage: {
       tokensUsed: usageMetadata.totalTokenCount || 0,
       promptTokens: usageMetadata.promptTokenCount || 0,
